@@ -1,11 +1,16 @@
 import { useMemo } from 'react'
-import { useActivityStore } from '../stores/activityStore'
+import { useVisibleActivities } from '../stores/activityStore'
+import { effectiveDuration } from '../utils/calculations'
 
 export function useTrainingStreak(): number {
-  const activities = useActivityStore(s => s.activities)
+  const activities = useVisibleActivities()
 
   return useMemo(() => {
-    const activeDays = new Set(activities.map(a => a.startTime.slice(0, 10)))
+    const activeDays = new Set(
+      activities
+        .filter(a => effectiveDuration(a) >= 15 * 60)
+        .map(a => a.startTime.slice(0, 10))
+    )
 
     const candidate = new Date()
     let iso = candidate.toISOString().slice(0, 10)

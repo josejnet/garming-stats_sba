@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { useActivityStore } from '../stores/activityStore'
+import { useEffect, useState, useMemo } from 'react'
+import { isSportEnabled, useActivityStore, useVisibleActivities } from '../stores/activityStore'
 import type { Sport } from '../types/garmin'
 import ActivityCard from '../components/ActivityCard'
 
@@ -7,17 +7,28 @@ const SPORTS: { value: Sport | 'all'; label: string }[] = [
   { value: 'all', label: 'Todos' },
   { value: 'running', label: '🏃 Running' },
   { value: 'cycling', label: '🚴 Ciclismo' },
+  { value: 'walking', label: '🚶 Caminar' },
+  { value: 'gym', label: '🏋️ Gym' },
   { value: 'swimming', label: '🏊 Natación' },
   { value: 'other', label: '⚡ Otro' },
 ]
 
 export default function Activities() {
-  const activities = useActivityStore(s => s.activities)
+  const activities = useVisibleActivities()
+  const settings = useActivityStore(s => s.settings)
   const [sportFilter, setSportFilter] = useState<Sport | 'all'>('all')
   const [yearFilter, setYearFilter] = useState<string>('all')
   const [page, setPage] = useState(0)
 
-  const PAGE_SIZE = 20
+  const PAGE_SIZE = 60
+  const sportOptions = SPORTS.filter(({ value }) => value === 'all' || isSportEnabled(value, settings))
+
+  useEffect(() => {
+    if (sportFilter !== 'all' && !isSportEnabled(sportFilter, settings)) {
+      setSportFilter('all')
+      setPage(0)
+    }
+  }, [settings, sportFilter])
 
   const years = useMemo(() => {
     const ys = new Set(activities.map(a => a.startTime.slice(0, 4)))
@@ -42,7 +53,7 @@ export default function Activities() {
       {/* Filters */}
       <div className="flex gap-3 mb-6 flex-wrap">
         <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
-          {SPORTS.map(({ value, label }) => (
+          {sportOptions.map(({ value, label }) => (
             <button
               key={value}
               onClick={() => { setSportFilter(value); setPage(0) }}
@@ -73,7 +84,7 @@ export default function Activities() {
       </div>
 
       {/* List */}
-      <div className="space-y-3">
+      <div className="space-y-1.5">
         {paginated.map(a => (
           <ActivityCard key={a.id} activity={a} />
         ))}

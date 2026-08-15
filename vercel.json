@@ -1,0 +1,22 @@
+{
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60
+    },
+    "api/**/*.py": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/((?!api/.*|assets/.*|data/.*|favicon.svg|icons.svg).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/sync",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

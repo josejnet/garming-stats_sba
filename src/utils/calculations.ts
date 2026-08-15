@@ -1,49 +1,120 @@
 import type { ActivitySummary, FitnessPoint, HRZone, UserSettings } from '../types/garmin'
 
-// ─── TSS Estimation ─────────────────────────────────────────────────────────
+export type LoadSource = 'direct' | 'power' | 'pace' | 'hr' | 'fallback'
+export type LoadConfidence = 'high' | 'medium' | 'low'
 
-/**
- * Estimates TSS for activities that don't have it from Garmin.
- * Uses TRIMP-derived method based on HR zones.
- */
-export function estimateTSS(activity: ActivitySummary, settings: UserSettings): number {
-  if (activity.tss != null) return activity.tss
-
-  const durationHours = activity.movingTime / 3600
-  const hrReserve = (activity.avgHR - 60) / (settings.maxHR - 60)
-
-  // TRIMP exponential weighting
-  const trimp = durationHours * 60 * hrReserve * 0.64 * Math.exp(1.92 * hrReserve)
-  // Normalize: assume 100 TSS ≈ 1h at threshold (TRIMP ~100 at threshold)
-  const thresholdHRReserve = (settings.lthrRunning - 60) / (settings.maxHR - 60)
-  const thresholdTRIMP = 60 * thresholdHRReserve * 0.64 * Math.exp(1.92 * thresholdHRReserve)
-
-  return Math.round((trimp / thresholdTRIMP) * 100)
+export interface TrainingLoad {
+  tss: number
+  source: LoadSource
+  confidence: LoadConfidence
 }
 
-// ─── CTL / ATL / TSB ────────────────────────────────────────────────────────
+export function effectiveDuration(activity: Pick<ActivitySummary, 'movingTime' | 'duration'>): number {
+  return Math.max(0, activity.movingTime || activity.duration || 0)
+}
 
-/**
- * Calculates the complete Fitness & Freshness time series.
- * CTL (Fitness) = 42-day EMA of daily TSS
- * ATL (Fatigue) = 7-day EMA of daily TSS
- * TSB (Form)    = CTL - ATL
- */
+export function elapsedDuration(activity: Pick<ActivitySummary, 'duration'>): number {
+  return Math.max(0, activity.duration || 0)
+}
+
+export function trainingLoad(activity: ActivitySummary, settings: UserSettings): TrainingLoad {
+  if (activity.tss != null && Number.isFinite(activity.tss)) {
+    return { tss: Math.max(0, activity.tss), source: 'direct', confidence: 'high' }
+  }
+
+  const hours = effectiveDuration(activity) / 3600
+  if (hours <= 0) return { tss: 0, source: 'fallback', confidence: 'low' }
+
+  if (activity.sport === 'cycling') {
+    const watts = activity.normalizedPower || activity.avgPower
+    if (watts && watts > 0 && settings.ftp > 0) {
+      const intensityFactor = clamp(watts / settings.ftp, 0.35, 1.4)
+      return {
+        tss: Math.round(hours * intensityFactor * intensityFactor * 100),
+        source: 'power',
+        confidence: activity.normalizedPower ? 'high' : 'medium',
+      }
+    }
+  }
+
+  if ((activity.sport === 'running' || activity.sport === 'walking') && activity.avgPace && settings.thresholdPace > 0) {
+    const intensityFactor = clamp(settings.thresholdPace / activity.avgPace, 0.3, 1.35)
+    const sportFactor = activity.sport === 'walking' ? 0.55 : 1
+    return {
+      tss: Math.round(hours * intensityFactor * intensityFactor * 100 * sportFactor),
+      source: 'pace',
+      confidence: activity.sport === 'running' ? 'medium' : 'low',
+    }
+  }
+
+  const hrLoad = estimateLoadFromHR(activity, settings, hours)
+  if (hrLoad) return hrLoad
+
+  const hourlyFallback: Record<string, number> = {
+    running: 55,
+    cycling: 45,
+    swimming: 50,
+    walking: 20,
+    gym: 35,
+    other: 20,
+  }
+  return {
+    tss: Math.round(hours * (hourlyFallback[activity.sport] ?? hourlyFallback.other)),
+    source: 'fallback',
+    confidence: 'low',
+  }
+}
+
+export function estimateTSS(activity: ActivitySummary, settings: UserSettings): number {
+  return trainingLoad(activity, settings).tss
+}
+
+function estimateLoadFromHR(activity: ActivitySummary, settings: UserSettings, hours: number): TrainingLoad | null {
+  if (!activity.avgHR || activity.avgHR < 60 || activity.avgHR >= settings.maxHR || settings.maxHR <= 80) return null
+
+  const restingHR = 60
+  const reserveRange = settings.maxHR - restingHR
+  if (reserveRange <= 0) return null
+
+  const hrReserve = clamp((activity.avgHR - restingHR) / reserveRange, 0, 1)
+  const thresholdHRReserve = clamp((settings.lthrRunning - restingHR) / reserveRange, 0.1, 1)
+
+  const trimp = hours * 60 * hrReserve * 0.64 * Math.exp(1.92 * hrReserve)
+  const thresholdTRIMP = 60 * thresholdHRReserve * 0.64 * Math.exp(1.92 * thresholdHRReserve)
+  if (!Number.isFinite(trimp) || !Number.isFinite(thresholdTRIMP) || thresholdTRIMP <= 0) return null
+
+  const sportFactor: Record<string, number> = {
+    running: 1,
+    cycling: 0.92,
+    swimming: 0.95,
+    walking: 0.65,
+    gym: 0.75,
+    other: 0.65,
+  }
+
+  return {
+    tss: Math.max(0, Math.round((trimp / thresholdTRIMP) * 100 * (sportFactor[activity.sport] ?? sportFactor.other))),
+    source: 'hr',
+    confidence: 'medium',
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
 export function calculateFitnessHistory(
   activities: ActivitySummary[],
   settings: UserSettings
 ): FitnessPoint[] {
   if (activities.length === 0) return []
 
-  // Build daily TSS map
   const dailyTSS: Record<string, number> = {}
   for (const act of activities) {
     const date = act.startTime.slice(0, 10)
-    const tss = estimateTSS(act, settings)
-    dailyTSS[date] = (dailyTSS[date] ?? 0) + tss
+    dailyTSS[date] = (dailyTSS[date] ?? 0) + estimateTSS(act, settings)
   }
 
-  // Sort and fill date range
   const dates = Object.keys(dailyTSS).sort()
   if (dates.length === 0) return []
 
@@ -56,31 +127,24 @@ export function calculateFitnessHistory(
     d.setDate(d.getDate() + 1)
   }
 
-  // EMA calculation
-  const ctlK = 2 / (42 + 1)  // 42-day EMA factor
-  const atlK = 2 / (7 + 1)   // 7-day EMA factor
-
+  const ctlK = 2 / (42 + 1)
+  const atlK = 2 / (7 + 1)
   let ctl = 0
   let atl = 0
-  const points: FitnessPoint[] = []
 
-  for (const date of allDates) {
+  return allDates.map(date => {
     const tss = dailyTSS[date] ?? 0
     ctl = ctl + ctlK * (tss - ctl)
     atl = atl + atlK * (tss - atl)
-    points.push({
+    return {
       date,
       ctl: Math.round(ctl * 10) / 10,
       atl: Math.round(atl * 10) / 10,
       tsb: Math.round((ctl - atl) * 10) / 10,
       tss,
-    })
-  }
-
-  return points
+    }
+  })
 }
-
-// ─── HR Zones ───────────────────────────────────────────────────────────────
 
 export interface ZoneDef {
   zone: number
@@ -106,7 +170,8 @@ export function getZoneBPM(maxHR: number): { zone: number; low: number; high: nu
   }))
 }
 
-export function hrZoneForBPM(bpm: number, maxHR: number): number {
+export function hrZoneForBPM(bpm: number, maxHR: number): number | null {
+  if (!bpm || bpm < 60 || !maxHR || maxHR <= 80 || bpm >= maxHR) return null
   const pct = bpm / maxHR
   for (let i = HR_ZONE_DEFS.length - 1; i >= 0; i--) {
     if (pct >= HR_ZONE_DEFS[i].minPct) return i + 1
@@ -114,9 +179,6 @@ export function hrZoneForBPM(bpm: number, maxHR: number): number {
   return 1
 }
 
-/**
- * Returns seconds spent in each zone for an activity that lacks zone data from Garmin.
- */
 export function estimateZonesFromHR(
   avgHR: number,
   duration: number,
@@ -126,69 +188,89 @@ export function estimateZonesFromHR(
   return HR_ZONE_DEFS.map((z) => ({
     zone: z.zone,
     name: z.name,
-    seconds: z.zone === zone ? duration : 0,
+    seconds: zone === z.zone ? Math.max(duration, 0) : 0,
     lowBPM: Math.round(maxHR * z.minPct),
     highBPM: Math.round(maxHR * z.maxPct),
   }))
 }
 
-// ─── Weekly / Monthly Aggregation ───────────────────────────────────────────
+export function hasUsableHR(activity: Pick<ActivitySummary, 'avgHR'>, maxHR: number): boolean {
+  return hrZoneForBPM(activity.avgHR, maxHR) != null
+}
 
 export interface WeekSummary {
-  weekStart: string   // YYYY-MM-DD (Monday)
+  weekStart: string
   totalTSS: number
   totalDistance: number
   totalDuration: number
-  byType: Record<string, { distance: number; duration: number; count: number }>
+  byType: Record<string, { distance: number; duration: number; count: number; tss: number }>
 }
 
 export function aggregateByWeek(activities: ActivitySummary[], settings: UserSettings): WeekSummary[] {
+  if (activities.length === 0) return []
+
   const weeks: Record<string, WeekSummary> = {}
+  const sorted = [...activities].sort((a, b) => a.startTime.localeCompare(b.startTime))
+  const firstWeek = mondayKey(sorted[0].startTime)
+  const currentWeek = mondayKey(new Date().toISOString())
+
+  for (let d = new Date(firstWeek); d <= new Date(currentWeek); d.setDate(d.getDate() + 7)) {
+    const weekKey = d.toISOString().slice(0, 10)
+    weeks[weekKey] = {
+      weekStart: weekKey,
+      totalTSS: 0,
+      totalDistance: 0,
+      totalDuration: 0,
+      byType: {},
+    }
+  }
 
   for (const act of activities) {
-    const d = new Date(act.startTime)
-    // Get Monday of this week
-    const day = d.getDay()
-    const diff = (day === 0 ? -6 : 1 - day)
-    const monday = new Date(d)
-    monday.setDate(d.getDate() + diff)
-    const weekKey = monday.toISOString().slice(0, 10)
-
-    if (!weeks[weekKey]) {
-      weeks[weekKey] = {
-        weekStart: weekKey,
-        totalTSS: 0,
-        totalDistance: 0,
-        totalDuration: 0,
-        byType: {},
-      }
+    const weekKey = mondayKey(act.startTime)
+    weeks[weekKey] ??= {
+      weekStart: weekKey,
+      totalTSS: 0,
+      totalDistance: 0,
+      totalDuration: 0,
+      byType: {},
     }
 
     const w = weeks[weekKey]
     const tss = estimateTSS(act, settings)
+    const duration = effectiveDuration(act)
     w.totalTSS += tss
     w.totalDistance += act.distance
-    w.totalDuration += act.duration
+    w.totalDuration += duration
 
     const sport = act.sport
-    if (!w.byType[sport]) w.byType[sport] = { distance: 0, duration: 0, count: 0 }
+    if (!w.byType[sport]) w.byType[sport] = { distance: 0, duration: 0, count: 0, tss: 0 }
     w.byType[sport].distance += act.distance
-    w.byType[sport].duration += act.duration
+    w.byType[sport].duration += duration
     w.byType[sport].count += 1
+    w.byType[sport].tss += tss
   }
 
   return Object.values(weeks).sort((a, b) => a.weekStart.localeCompare(b.weekStart))
 }
 
-// ─── Personal Records ────────────────────────────────────────────────────────
+function mondayKey(isoDate: string): string {
+  const d = new Date(isoDate)
+  const day = d.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diff)
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString().slice(0, 10)
+}
 
 export interface PR {
-  distance: number   // km
+  id: string
+  category: 'Tiempo' | 'Distancia' | 'Carga' | 'Potencia' | 'Frecuencia'
   label: string
+  value: string
+  detail?: string
   activityId: number
+  activityTitle: string
   date: string
-  pace: number       // sec/km
-  duration: number   // seconds
 }
 
 const RUNNING_DISTANCES = [
@@ -202,43 +284,149 @@ const RUNNING_DISTANCES = [
 const CYCLING_DISTANCES = [
   { km: 40, label: '40 km' },
   { km: 90, label: '90 km' },
-  { km: 180, label: '180 km (Full IM)' },
+  { km: 180, label: '180 km' },
 ]
 
-export function computePRs(activities: ActivitySummary[]): Record<string, PR[]> {
-  const running = activities.filter(a => a.sport === 'running')
-  const cycling = activities.filter(a => a.sport === 'cycling')
-
+export function computePRs(activities: ActivitySummary[], settings?: UserSettings): Record<string, PR[]> {
   return {
-    running: findPRsForSport(running, RUNNING_DISTANCES),
-    cycling: findPRsForSport(cycling, CYCLING_DISTANCES),
+    running: [
+      ...findFastestDistanceRecords(activities.filter(a => a.sport === 'running'), RUNNING_DISTANCES, 'pace'),
+      ...findGeneralRecords(activities.filter(a => a.sport === 'running'), settings),
+    ],
+    cycling: [
+      ...findFastestDistanceRecords(activities.filter(a => a.sport === 'cycling'), CYCLING_DISTANCES, 'speed'),
+      ...findGeneralRecords(activities.filter(a => a.sport === 'cycling'), settings, { includePower: true }),
+    ],
+    walking: [
+      ...findFastestDistanceRecords(activities.filter(a => a.sport === 'walking'), [
+        { km: 1, label: '1 km' },
+        { km: 5, label: '5 km' },
+        { km: 10, label: '10 km' },
+      ], 'pace'),
+      ...findGeneralRecords(activities.filter(a => a.sport === 'walking'), settings),
+    ],
+    gym: findGeneralRecords(activities.filter(a => a.sport === 'gym'), settings, { includeDistance: false }),
   }
 }
 
-function findPRsForSport(
+function findFastestDistanceRecords(
   activities: ActivitySummary[],
-  distances: { km: number; label: string }[]
+  distances: { km: number; label: string }[],
+  detailMode: 'pace' | 'speed'
 ): PR[] {
   return distances.map(({ km, label }) => {
     const candidates = activities.filter(a => a.distance >= km * 0.95)
-    if (candidates.length === 0) return null
-
-    // Best pace for approximately this distance
     let best: PR | null = null
     for (const act of candidates) {
-      if (!act.avgPace) continue
-      const pace = act.avgPace
-      if (!best || pace < best.pace) {
+      const duration = estimatedDurationForDistance(act, km)
+      if (!duration) continue
+      if (!best || duration < durationValue(best.value)) {
+        const speed = km / (duration / 3600)
         best = {
-          distance: km,
-          label,
+          id: `best-average-${label}`,
+          category: 'Tiempo',
+          label: `${label} (media actividad)`,
+          value: formatRecordDuration(duration),
+          detail: detailMode === 'speed' ? `${speed.toFixed(1)} km/h` : `${formatRecordPace(duration / km)} /km`,
           activityId: act.id,
+          activityTitle: act.title,
           date: act.startTime.slice(0, 10),
-          pace,
-          duration: Math.round(km * pace),
         }
       }
     }
     return best
   }).filter(Boolean) as PR[]
+}
+
+function estimatedDurationForDistance(activity: ActivitySummary, km: number): number | null {
+  if (activity.distance <= 0) return null
+  const duration = effectiveDuration(activity)
+  if (duration <= 0) return null
+  return Math.round(km * (duration / activity.distance))
+}
+
+function findGeneralRecords(
+  activities: ActivitySummary[],
+  settings?: UserSettings,
+  options: { includeDistance?: boolean; includePower?: boolean } = {}
+): PR[] {
+  const includeDistance = options.includeDistance ?? true
+  const records: PR[] = []
+
+  if (includeDistance) {
+    const longest = maxBy(activities, a => a.distance)
+    if (longest && longest.distance > 0) records.push(recordFromActivity(longest, 'Distancia', 'Mayor distancia', `${longest.distance.toFixed(2)} km`))
+  }
+
+  const longestTime = maxBy(activities, a => effectiveDuration(a))
+  if (longestTime && effectiveDuration(longestTime) > 0) records.push(recordFromActivity(longestTime, 'Tiempo', 'Mayor tiempo en movimiento', formatRecordDuration(effectiveDuration(longestTime))))
+
+  const elevation = maxBy(activities, a => a.elevationGain)
+  if (elevation && elevation.elevationGain > 0) records.push(recordFromActivity(elevation, 'Distancia', 'Mayor desnivel +', `${Math.round(elevation.elevationGain)} m`))
+
+  const avgHr = maxBy(activities, a => a.avgHR)
+  if (avgHr && avgHr.avgHR > 0) records.push(recordFromActivity(avgHr, 'Frecuencia', 'FC media más alta', `${Math.round(avgHr.avgHR)} bpm`))
+
+  if (settings) {
+    const load = maxBy(activities, a => trainingLoad(a, settings).tss)
+    if (load && trainingLoad(load, settings).tss > 0) records.push(recordFromActivity(load, 'Carga', 'Mayor carga estimada', `${Math.round(trainingLoad(load, settings).tss)} TSS`))
+  }
+
+  if (options.includePower) {
+    const power = maxBy(activities, a => a.normalizedPower || a.avgPower || 0)
+    const watts = power ? power.normalizedPower || power.avgPower || 0 : 0
+    if (power && watts > 0) records.push(recordFromActivity(power, 'Potencia', power.normalizedPower ? 'Potencia normalizada más alta' : 'Potencia media más alta', `${Math.round(watts)} W`))
+  }
+
+  return records
+}
+
+function recordFromActivity(activity: ActivitySummary, category: PR['category'], label: string, value: string, detail?: string): PR {
+  return {
+    id: `${category}-${label}`,
+    category,
+    label,
+    value,
+    detail,
+    activityId: activity.id,
+    activityTitle: activity.title,
+    date: activity.startTime.slice(0, 10),
+  }
+}
+
+function maxBy(activities: ActivitySummary[], value: (activity: ActivitySummary) => number | null | undefined) {
+  let best: ActivitySummary | null = null
+  let bestValue = Number.NEGATIVE_INFINITY
+  for (const activity of activities) {
+    const current = value(activity)
+    if (current == null || !Number.isFinite(current)) continue
+    if (current > bestValue) {
+      best = activity
+      bestValue = current
+    }
+  }
+  return best
+}
+
+function durationValue(value: string): number {
+  const hours = value.match(/(\d+)h/)
+  const minutes = value.match(/(\d+)m/)
+  const seconds = value.match(/(\d+):(\d+)/)
+  if (hours || minutes) return (hours ? Number(hours[1]) * 3600 : 0) + (minutes ? Number(minutes[1]) * 60 : 0)
+  if (seconds) return Number(seconds[1]) * 60 + Number(seconds[2])
+  return Number.POSITIVE_INFINITY
+}
+
+function formatRecordDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.round(seconds % 60)
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function formatRecordPace(secPerKm: number): string {
+  const m = Math.floor(secPerKm / 60)
+  const s = Math.round(secPerKm % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
 }

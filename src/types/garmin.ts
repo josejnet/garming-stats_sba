@@ -1,4 +1,7 @@
-export type Sport = 'running' | 'cycling' | 'swimming' | 'other'
+export type Sport = 'running' | 'cycling' | 'swimming' | 'walking' | 'gym' | 'other'
+export type PrimarySport = 'running' | 'cycling' | 'swimming' | 'walking' | 'gym'
+export type ThemeMode = 'dark' | 'light'
+export type MapStyle = 'auto' | 'osm' | 'voyager' | 'topo'
 
 export interface HRZone {
   zone: number
@@ -21,6 +24,9 @@ export interface Lap {
 
 export interface ActivitySummary {
   id: number
+  source?: 'garmin' | 'strava'
+  sourceType?: string
+  sourceUrl?: string | null
   title: string
   sport: Sport
   startTime: string    // ISO local datetime
@@ -32,14 +38,27 @@ export interface ActivitySummary {
   maxHR: number
   calories: number
   tss: number | null
-  avgPace: number | null    // sec/km (running/swim)
-  avgSpeed: number | null   // km/h (cycling)
+  avgPace: number | null    // sec/km (running/walking/swim)
+  avgSpeed: number | null   // km/h (cycling/walking)
   avgPower: number | null   // watts (cycling)
   normalizedPower: number | null
   avgCadence: number | null
   vo2max: number | null
   aerobicTE: number | null
   anaerobicTE: number | null
+  startLocation?: {
+    city?: string | null
+    region?: string | null
+    country?: string | null
+    countryCode?: string | null
+    label?: string | null
+    lat?: number
+    lon?: number
+  } | null
+  endLocation?: {
+    lat?: number
+    lon?: number
+  } | null
   // Swimming only
   swolf?: number | null
   avgStrokesPerLength?: number | null
@@ -74,6 +93,9 @@ export interface UserSettings {
   lthrRunning: number  // Lactate threshold HR for running
   thresholdPace: number // seconds per km at threshold
   ftpDate?: string
+  enabledSports: Record<PrimarySport, boolean>
+  theme: ThemeMode
+  mapStyle: MapStyle
 }
 
 export const DEFAULT_SETTINGS: UserSettings = {
@@ -81,4 +103,13 @@ export const DEFAULT_SETTINGS: UserSettings = {
   ftp: 250,
   lthrRunning: 165,
   thresholdPace: 270, // ~4:30/km
+  enabledSports: {
+    running: true,
+    cycling: true,
+    swimming: false,
+    walking: true,
+    gym: true,
+  },
+  theme: 'light',
+  mapStyle: 'auto',
 }

@@ -11,12 +11,26 @@ SPORT_MAP = {
     "treadmill_running": "running",
     "cycling": "cycling",
     "road_cycling": "cycling",
+    "road_biking": "cycling",
     "indoor_cycling": "cycling",
+    "indoor_biking": "cycling",
     "virtual_ride": "cycling",
     "mountain_biking": "cycling",
+    "gravel_cycling": "cycling",
     "swimming": "swimming",
     "open_water_swimming": "swimming",
     "pool_swimming": "swimming",
+    "walking": "walking",
+    "hiking": "walking",
+    "casual_walking": "walking",
+    "speed_walking": "walking",
+    "strength_training": "gym",
+    "cardio_training": "gym",
+    "hiit": "gym",
+    "indoor_cardio": "gym",
+    "elliptical": "gym",
+    "pilates": "gym",
+    "yoga": "gym",
 }
 
 
@@ -43,8 +57,10 @@ def normalize_summary(activity: dict) -> dict:
 
     summary = {
         "id": activity.get("activityId"),
+        "sourceUrl": f"https://connect.garmin.com/modern/activity/{activity.get('activityId')}",
         "title": activity.get("activityName", "Untitled"),
         "sport": sport,
+        "sourceType": activity.get("activityType", {}).get("typeKey"),
         "startTime": activity.get("startTimeLocal") or activity.get("startTimeGMT"),
         "distance": round((_safe(activity, "distance") or 0) / 1000, 2),  # km
         "duration": round(_safe(activity, "duration") or 0),  # seconds

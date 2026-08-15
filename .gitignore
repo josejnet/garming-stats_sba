@@ -17,6 +17,7 @@ dist-ssr
 .env.local
 .env.*.local
 !.env.example
+.strava_tokens.json
 
 # Datos personales descargados de Garmin Connect
 public/data/
@@ -37,3 +38,24 @@ dist/data/**
 *.njsproj
 *.sln
 *.sw?
+.vercel
+.env*.local
+
+# Volcados, copias de seguridad y bases de datos locales (pueden contener datos personales)
+dumps/
+backups/
+*.dump
+*.backup
+*.bak
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.db
+
+# Claves y credenciales exportadas
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+service-account*.json

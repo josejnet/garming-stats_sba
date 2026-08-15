@@ -1,0 +1,13 @@
+node_modules
+dist
+.venv
+public/data
+public/data/**
+*.log
+.codex-*.log
+.strava_tokens.json
+.env
+.env.*
+!.env.example
+.git
+.garth

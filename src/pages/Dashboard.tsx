@@ -1,22 +1,22 @@
-import { Link } from 'react-router-dom'
-import { useActivityStore } from '../stores/activityStore'
-import { formatDuration, formatPace, sportIcon, sportColor } from '../utils/formatters'
-import { daysAgo } from '../utils/date'
+﻿import { Link } from 'react-router-dom'
+import { isSportEnabled, useActivityStore, useVisibleActivities } from '../stores/activityStore'
+import { formatShortDate, sportIcon } from '../utils/formatters'
 import { useFitnessHistory } from '../hooks/useFitnessHistory'
 import { useWeekComparison } from '../hooks/useWeekComparison'
 import { useSportVolume } from '../hooks/useSportVolume'
 import { useTrainingStreak } from '../hooks/useTrainingStreak'
 import { useZoneDistribution } from '../hooks/useZoneDistribution'
-import { useWeeklyLoad } from '../hooks/useWeeklyLoad'
+import { useVo2maxTrend } from '../hooks/usePerformanceData'
 import RadialProgress from '../components/RadialProgress'
 import FormBadge from '../components/FormBadge'
 import DeltaBadge from '../components/DeltaBadge'
+import OnboardingCarousel from '../components/OnboardingCarousel'
 import {
   AreaChart, Area, XAxis, Tooltip, ResponsiveContainer,
   RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from 'recharts'
 
-// ─── Loading / Empty states ───────────────────────────────────────────────────
+// Loading / Empty states
 
 function LoadingScreen() {
   return (
@@ -27,50 +27,97 @@ function LoadingScreen() {
 }
 
 function EmptyScreen() {
+  return <OnboardingCarousel />
+}
+
+function FilteredOutScreen() {
   return (
     <div className="flex-1 p-8 max-w-2xl">
       <div className="bg-amber-950/40 border border-amber-800/50 rounded-xl p-6">
-        <h2 className="text-amber-300 font-medium text-lg mb-2">Sin datos de Garmin</h2>
-        <div className="bg-slate-900 rounded-lg p-4 font-mono text-sm text-slate-300 space-y-1 mt-3">
-          <div>cp .env.example .env</div>
-          <div>cd fetch && pip install -r requirements.txt</div>
-          <div>python3 sync.py --limit 20</div>
-        </div>
+        <h2 className="text-amber-300 font-medium text-lg mb-2">Sin deportes activos con actividad</h2>
+        <p className="text-sm text-slate-400">
+          Activa running, ciclismo o natacion en Ajustes para que MostlyZ2 vuelva a incluir esas actividades en metricas y graficas.
+        </p>
       </div>
     </div>
   )
 }
 
-// ─── Dashboard ────────────────────────────────────────────────────────────────
+// Dashboard
 
 export default function Dashboard() {
-  const activities = useActivityStore(s => s.activities)
+  const allActivities = useActivityStore(s => s.activities)
+  const activities = useVisibleActivities()
   const stats = useActivityStore(s => s.stats)
+  const settings = useActivityStore(s => s.settings)
   const loading = useActivityStore(s => s.loading)
   const error = useActivityStore(s => s.error)
 
-  const { current: fitness, sparkPoints } = useFitnessHistory()
+  const { current: fitness, sparkPoints, sparkRange } = useFitnessHistory()
   const { current: week, previous: lastWeek } = useWeekComparison()
-  const { bySport: sportHours, totalHours, percentages } = useSportVolume(30)
+  const { bySport: sportHours, totalHours, totalEstimatedSteps, avgDailyEstimatedSteps, percentages } = useSportVolume(30)
   const streak = useTrainingStreak()
-  const { slices: zoneSlices, isAerobicFocused } = useZoneDistribution(30)
-  const weeklyLoad = useWeeklyLoad(16)
+  const { slices: zoneSlices, isAerobicFocused, unknownHours } = useZoneDistribution(30)
+  const { current: currentVo2max, hasEstimated: hasEstimatedVo2 } = useVo2maxTrend()
 
   if (loading) return <LoadingScreen />
-  if (error || activities.length === 0) return <EmptyScreen />
+  if (error || allActivities.length === 0) return <EmptyScreen />
+  if (activities.length === 0) return <FilteredOutScreen />
 
   const tsb = fitness?.tsb ?? 0
   const ctl = fitness?.ctl ?? 0
   const atl = fitness?.atl ?? 0
   const tsbColor = tsb > 10 ? '#22c55e' : tsb > -5 ? '#3b82f6' : tsb > -15 ? '#eab308' : tsb > -25 ? '#f97316' : '#ef4444'
-  const maxWeekTSS = Math.max(...weeklyLoad.map(w => w.tss), 1)
+  const sportRings = [
+    { sport: 'running' as const,  label: 'Running',  color: '#ef4444', max: 20 },
+    { sport: 'cycling' as const,  label: 'Ciclismo', color: '#f97316', max: 30 },
+    { sport: 'walking' as const,  label: 'Caminar',  color: '#14b8a6', max: 8  },
+    { sport: 'gym' as const,      label: 'Gym',      color: '#a855f7', max: 6  },
+    { sport: 'swimming' as const, label: 'Natacion', color: '#3b82f6', max: 8  },
+  ].filter(({ sport }) => isSportEnabled(sport, settings))
+  const activeVolumeLabels = [
+    { sport: 'running' as const, label: 'R' },
+    { sport: 'cycling' as const, label: 'C' },
+    { sport: 'walking' as const, label: 'W' },
+    { sport: 'gym' as const, label: 'G' },
+    { sport: 'swimming' as const, label: 'N' },
+  ]
+    .filter(({ sport }) => isSportEnabled(sport, settings))
+    .map(({ sport, label }) => `${label} ${Math.round(percentages[sport])}%`)
+    .join(' · ')
+  const activeStepLabels = [
+    { sport: 'running' as const, label: 'R' },
+    { sport: 'cycling' as const, label: 'C' },
+    { sport: 'walking' as const, label: 'W' },
+    { sport: 'gym' as const, label: 'G' },
+    { sport: 'swimming' as const, label: 'N' },
+  ]
+    .filter(({ sport }) => isSportEnabled(sport, settings) && sportHours[sport].estimatedSteps > 0)
+    .map(({ sport, label }) => `${label} ${formatCompactNumber(sportHours[sport].estimatedSteps)}`)
+    .join(' · ')
+  const isLightTheme = settings.theme === 'light'
+  const tooltipContentStyle = {
+    background: isLightTheme ? '#ffffff' : '#1e293b',
+    border: `1px solid ${isLightTheme ? '#94a3b8' : '#334155'}`,
+    borderRadius: 8,
+    boxShadow: isLightTheme ? '0 12px 28px rgb(15 23 42 / 0.18)' : 'none',
+    color: isLightTheme ? '#0f172a' : '#e2e8f0',
+    fontSize: 11,
+  }
+  const tooltipLabelStyle = {
+    color: isLightTheme ? '#0f172a' : '#cbd5e1',
+    fontWeight: 700,
+    marginBottom: 4,
+  }
+  const tooltipItemStyle = {
+    color: isLightTheme ? '#1e293b' : '#e2e8f0',
+  }
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#080f1e]">
 
-      {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <div className="relative overflow-hidden px-6 pt-7 pb-6"
-        style={{ background: 'linear-gradient(135deg, #0f172a 0%, #0c1a3a 50%, #0f172a 100%)' }}>
+      {/* Hero */}
+      <div className="app-hero relative overflow-hidden px-6 pt-7 pb-6">
         <div className="absolute top-0 left-1/4 w-96 h-48 rounded-full opacity-10 blur-3xl pointer-events-none"
           style={{ background: tsbColor }} />
 
@@ -84,19 +131,20 @@ export default function Dashboard() {
               </span>
               <div>
                 <FormBadge tsb={tsb} />
-                <div className="text-xs text-slate-500 mt-1.5">Forma = Fitness − Fatiga</div>
+                <div className="text-xs text-slate-500 mt-1.5">Forma = Fitness - Fatiga</div>
               </div>
             </div>
           </div>
 
           {/* VO2max */}
-          {stats?.vo2maxHistory?.length ? (
+          {currentVo2max ? (
             <div className="text-right">
               <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">VO2max</div>
               <div className="text-3xl font-black text-purple-400" style={{ textShadow: '0 0 20px #a855f766' }}>
-                {stats.vo2maxHistory.at(-1)!.value.toFixed(1)}
+                {currentVo2max.toFixed(1)}
               </div>
               <div className="text-xs text-slate-500">ml/kg/min</div>
+              {hasEstimatedVo2 && <div className="text-[10px] text-slate-600">estimado</div>}
             </div>
           ) : null}
         </div>
@@ -135,10 +183,10 @@ export default function Dashboard() {
               </div>
             )}
             <div className="text-right">
-              <div className="text-xs text-slate-500">{stats?.totalActivities ?? activities.length} actividades</div>
+              <div className="text-xs text-slate-500">{activities.length} actividades activas</div>
               {stats?.syncedAt && (
                 <div className="text-xs text-slate-600">
-                  Sync: {new Date(stats.syncedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                  Sync: {formatShortDate(stats.syncedAt)}
                 </div>
               )}
             </div>
@@ -161,8 +209,16 @@ export default function Dashboard() {
               </defs>
               <XAxis dataKey="date" hide />
               <Tooltip
-                contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 11 }}
+                contentStyle={tooltipContentStyle}
+                labelStyle={tooltipLabelStyle}
+                itemStyle={tooltipItemStyle}
                 formatter={(v: unknown, n: unknown) => [String(v), String(n)]}
+                labelFormatter={(_label, payload) => {
+                  const fullDate = payload?.[0]?.payload?.fullDate
+                  return fullDate
+                    ? formatShortDate(fullDate)
+                    : ''
+                }}
               />
               <Area type="monotone" dataKey="ctl" name="Fitness" stroke="#3b82f6" strokeWidth={2} fill="url(#gCTL)" dot={false} />
               <Area type="monotone" dataKey="atl" name="Fatiga" stroke="#f97316" strokeWidth={1.5} fill="url(#gATL)" dot={false} strokeDasharray="3 2" />
@@ -173,20 +229,20 @@ export default function Dashboard() {
           <LegendDot color="#3b82f6" label="Fitness (CTL)" />
           <LegendDot color="#f97316" label="Fatiga (ATL)" />
         </div>
+        {sparkRange && <TemporalIndicator start={sparkRange.start} end={sparkRange.end} days={sparkRange.days} />}
       </div>
 
-      {/* ── Body ─────────────────────────────────────────────────────────── */}
+      {/* Body */}
       <div className="px-6 py-5 space-y-5">
 
         {/* Week comparison */}
         <section>
           <SectionHeader left="Esta semana" right="vs semana anterior" />
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {[
               { label: 'Sesiones',    value: week.count,            prev: lastWeek.count,            fmt: (v: number) => String(v),              unit: '' },
               { label: 'Distancia',   value: week.distance,         prev: lastWeek.distance,         fmt: (v: number) => v.toFixed(1),           unit: 'km' },
-              { label: 'Tiempo',      value: week.duration / 3600,  prev: lastWeek.duration / 3600,  fmt: (v: number) => v.toFixed(1),           unit: 'h' },
-              { label: 'Carga (TSS)', value: week.tss,              prev: lastWeek.tss,              fmt: (v: number) => Math.round(v).toString(), unit: '' },
+              { label: 'Tiempo activo', value: week.duration / 3600,  prev: lastWeek.duration / 3600,  fmt: (v: number) => v.toFixed(1),           unit: 'h' },
             ].map(({ label, value, prev, fmt, unit }) => (
               <div key={label} className="bg-slate-800/50 border border-slate-700/40 rounded-xl p-4 hover:border-slate-600/60 transition-colors">
                 <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">{label}</div>
@@ -202,14 +258,25 @@ export default function Dashboard() {
         {/* Sport rings + Zone radar */}
         <div className="grid grid-cols-2 gap-4">
 
-          <div className="bg-slate-800/50 border border-slate-700/40 rounded-xl p-5">
-            <div className="text-xs text-slate-500 uppercase tracking-wider mb-4">Volumen · últimos 30 días</div>
-            <div className="flex items-center justify-around">
-              {([
-                { sport: 'running' as const,  label: 'Running',  color: '#ef4444', max: 20 },
-                { sport: 'cycling' as const,  label: 'Ciclismo', color: '#f97316', max: 30 },
-                { sport: 'swimming' as const, label: 'Natación', color: '#3b82f6', max: 8  },
-              ]).map(({ sport, label, color, max }) => (
+          <div className="bg-slate-800/50 border border-slate-700/40 rounded-xl p-4">
+            <div className="mb-3 flex items-start justify-between gap-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wider">Volumen · últimos 30 días</div>
+              <div className="text-right text-xs text-slate-500 leading-relaxed">
+                <div>
+                  Total: <span className="text-slate-300 font-medium">{totalHours.toFixed(1)}h</span>
+                  {totalHours > 0 && <> · {activeVolumeLabels}</>}
+                </div>
+                {totalEstimatedSteps > 0 && (
+                  <div>
+                    Pasos estimados/equiv.: <span className="text-slate-300 font-medium">{formatNumber(totalEstimatedSteps)}</span>
+                    <span className="text-slate-600"> · {formatNumber(avgDailyEstimatedSteps)} /día</span>
+                    {activeStepLabels && <span className="text-slate-600"> · {activeStepLabels}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-5 gap-3">
+              {sportRings.map(({ sport, label, color, max }) => (
                 <div key={sport} className="flex flex-col items-center gap-2">
                   <RadialProgress value={sportHours[sport].hours} max={max} color={color} size={80} stroke={7}>
                     <div className="text-center">
@@ -224,18 +291,13 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
-            <div className="mt-4 pt-3 border-t border-slate-700/50 text-xs text-slate-500 text-center">
-              Total: <span className="text-slate-300 font-medium">{totalHours.toFixed(1)}h</span>
-              {totalHours > 0 && (
-                <> · R {Math.round(percentages.running)}% · C {Math.round(percentages.cycling)}% · N {Math.round(percentages.swimming)}%</>
-              )}
-            </div>
           </div>
 
           <div className="bg-slate-800/50 border border-slate-700/40 rounded-xl p-5">
             <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Zonas FC · 30 días</div>
             <div className="text-xs mb-2" style={{ color: isAerobicFocused ? '#22c55e' : '#eab308' }}>
-              {isAerobicFocused ? '✅ Buena base aeróbica (Z1+Z2 >60%)' : '⚠️ Añade más entrenamiento en Z1–Z2'}
+              {isAerobicFocused ? 'OK Buena base aeróbica (Z1+Z2 >60%)' : 'Atención: añade más entrenamiento en Z1-Z2'}
+              {unknownHours > 0 && <span className="text-slate-600"> · {unknownHours.toFixed(1)}h sin FC excluidas</span>}
             </div>
             <ResponsiveContainer width="100%" height={180}>
               <RadarChart data={zoneSlices} margin={{ top: 0, right: 20, bottom: 0, left: 20 }}>
@@ -243,7 +305,9 @@ export default function Dashboard() {
                 <PolarAngleAxis dataKey="zone" tick={{ fill: '#64748b', fontSize: 10 }} />
                 <Radar dataKey="pct" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.2} strokeWidth={1.5} />
                 <Tooltip
-                  contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 11 }}
+                  contentStyle={tooltipContentStyle}
+                  labelStyle={tooltipLabelStyle}
+                  itemStyle={tooltipItemStyle}
                   formatter={(v: unknown) => [`${v}%`, 'Tiempo']}
                 />
               </RadarChart>
@@ -256,89 +320,13 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Weekly TSS bar chart */}
-        <div className="bg-slate-800/50 border border-slate-700/40 rounded-xl p-5">
-          <SectionHeader left="Carga semanal (TSS) · 16 semanas" rightLink={{ to: '/fitness', label: 'Ver completo →' }} />
-          <div className="flex items-end gap-1 h-20">
-            {weeklyLoad.map((w, i) => {
-              const isCurrentWeek = i === weeklyLoad.length - 1
-              return (
-                <div key={w.week} className="flex-1 flex flex-col items-center" title={`${w.week}: ${w.tss} TSS`}>
-                  <div
-                    className="w-full rounded-t transition-all"
-                    style={{
-                      height: `${Math.max((w.tss / maxWeekTSS) * 100, 2)}%`,
-                      background: isCurrentWeek ? 'linear-gradient(to top, #3b82f6, #60a5fa)' : '#334155',
-                      boxShadow: isCurrentWeek ? '0 0 8px #3b82f660' : 'none',
-                    }}
-                  />
-                </div>
-              )
-            })}
-          </div>
-          <div className="flex justify-between mt-1">
-            <span className="text-xs text-slate-600">{weeklyLoad[0]?.week}</span>
-            <span className="text-xs text-blue-400 font-medium">
-              esta semana {week.tss > 0 ? `${Math.round(week.tss)} TSS` : ''}
-            </span>
-          </div>
-        </div>
-
-        {/* Recent activities */}
-        <section>
-          <SectionHeader left="Últimas actividades" rightLink={{ to: '/activities', label: 'Ver todas →' }} />
-          <div className="space-y-2">
-            {activities.slice(0, 6).map(a => (
-              <Link
-                key={a.id}
-                to={`/activity/${a.id}`}
-                className="flex items-center gap-4 px-4 py-3 rounded-xl border border-slate-700/40 bg-slate-800/30 hover:bg-slate-800/70 hover:border-slate-600/50 transition-all group"
-              >
-                <div className="w-2 h-2 rounded-full shrink-0"
-                  style={{ background: sportColor(a.sport), boxShadow: `0 0 6px ${sportColor(a.sport)}88` }} />
-
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-slate-200 truncate group-hover:text-white">{a.title}</div>
-                  <div className="text-xs text-slate-500">
-                    {daysAgo(a.startTime) === 0 ? 'Hoy' : daysAgo(a.startTime) === 1 ? 'Ayer' : `Hace ${daysAgo(a.startTime)}d`}
-                    {' · '}{sportIcon(a.sport)}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-5 shrink-0 text-right">
-                  {a.distance > 0 && (
-                    <div>
-                      <div className="text-sm font-bold text-slate-200">
-                        {a.distance.toFixed(1)}<span className="text-xs text-slate-500 ml-0.5">km</span>
-                      </div>
-                      {a.avgPace && <div className="text-xs text-slate-500">{formatPace(a.avgPace)}</div>}
-                      {a.avgSpeed && !a.avgPace && <div className="text-xs text-slate-500">{a.avgSpeed.toFixed(1)} km/h</div>}
-                    </div>
-                  )}
-                  <div>
-                    <div className="text-sm font-bold text-slate-200">{formatDuration(a.duration)}</div>
-                    {a.avgHR > 0 && <div className="text-xs text-slate-500">{a.avgHR} bpm</div>}
-                  </div>
-                  {a.tss != null && (
-                    <div className="w-10 text-right">
-                      <div className="text-sm font-bold" style={{ color: sportColor(a.sport) }}>{Math.round(a.tss)}</div>
-                      <div className="text-xs text-slate-600">TSS</div>
-                    </div>
-                  )}
-                  <div className="text-slate-600 group-hover:text-slate-400 text-xs">→</div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-
         <div className="h-2" />
       </div>
     </div>
   )
 }
 
-// ─── Shared layout helpers ────────────────────────────────────────────────────
+// Shared layout helpers
 
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
@@ -347,6 +335,37 @@ function LegendDot({ color, label }: { color: string; label: string }) {
       {label}
     </span>
   )
+}
+
+function TemporalIndicator({ start, end, days }: { start: string; end: string; days: number }) {
+  return (
+    <div className="mt-4 rounded-lg border border-slate-700/40 bg-slate-900/20 px-3 py-2">
+      <div className="flex items-center justify-between text-[11px] text-slate-500">
+        <span>{formatShortDate(start)}</span>
+        <span className="font-semibold uppercase tracking-wider text-slate-400">
+          Ultimos {days} dias
+        </span>
+        <span>{formatShortDate(end)}</span>
+      </div>
+      <div className="relative mt-2 h-1.5 rounded-full bg-slate-700/60">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-blue-500/60" style={{ width: '100%' }} />
+        <div className="absolute right-0 top-1/2 size-3 -translate-y-1/2 rounded-full border-2 border-white bg-blue-500 shadow" />
+      </div>
+      <div className="mt-1 text-right text-[10px] uppercase tracking-wider text-slate-500">
+        Hoy
+      </div>
+    </div>
+  )
+}
+
+function formatNumber(value: number) {
+  return Math.round(value).toLocaleString('es-ES')
+}
+
+function formatCompactNumber(value: number) {
+  const rounded = Math.round(value)
+  if (rounded >= 1000) return `${(rounded / 1000).toFixed(1).replace('.', ',')}k`
+  return rounded.toLocaleString('es-ES')
 }
 
 function SectionHeader({

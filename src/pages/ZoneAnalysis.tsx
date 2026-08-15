@@ -1,17 +1,25 @@
-import { useMemo, useState } from 'react'
-import { useActivityStore } from '../stores/activityStore'
+import { useEffect, useMemo, useState } from 'react'
+import { isSportEnabled, useActivityStore, useVisibleActivities } from '../stores/activityStore'
 import type { Sport } from '../types/garmin'
-import { estimateZonesFromHR, HR_ZONE_DEFS } from '../utils/calculations'
-import { formatDuration } from '../utils/formatters'
+import { effectiveDuration, estimateZonesFromHR, hasUsableHR, HR_ZONE_DEFS } from '../utils/calculations'
+import { formatDuration, formatShortDate } from '../utils/formatters'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from 'recharts'
 
 export default function ZoneAnalysis() {
-  const activities = useActivityStore(s => s.activities)
+  const activities = useVisibleActivities()
   const settings = useActivityStore(s => s.settings)
   const [sport, setSport] = useState<Sport | 'all'>('all')
+  const sportOptions = (['all', 'running', 'cycling', 'walking', 'gym', 'swimming'] as const)
+    .filter(s => s === 'all' || isSportEnabled(s, settings))
+
+  useEffect(() => {
+    if (sport !== 'all' && !isSportEnabled(sport, settings)) {
+      setSport('all')
+    }
+  }, [settings, sport])
 
   const filtered = useMemo(() =>
     activities.filter(a => sport === 'all' || a.sport === sport),
@@ -21,13 +29,18 @@ export default function ZoneAnalysis() {
   const zoneSeconds = useMemo(() => {
     const totals: number[] = [0, 0, 0, 0, 0]
     for (const act of filtered) {
-      const zones = estimateZonesFromHR(act.avgHR, act.duration, settings.maxHR)
+      if (!hasUsableHR(act, settings.maxHR)) continue
+      const zones = estimateZonesFromHR(act.avgHR, effectiveDuration(act), settings.maxHR)
       zones.forEach(z => { totals[z.zone - 1] += z.seconds })
     }
     return totals
   }, [filtered, settings.maxHR])
 
   const totalSeconds = zoneSeconds.reduce((a, b) => a + b, 0)
+  const unknownSeconds = useMemo(() =>
+    filtered.reduce((sum, act) => sum + (hasUsableHR(act, settings.maxHR) ? 0 : effectiveDuration(act)), 0),
+    [filtered, settings.maxHR]
+  )
 
   const weeklyZoneData = useMemo(() => {
     const weeks: Record<string, number[]> = {}
@@ -39,14 +52,15 @@ export default function ZoneAnalysis() {
       monday.setDate(d.getDate() + diff)
       const weekKey = monday.toISOString().slice(0, 10)
       if (!weeks[weekKey]) weeks[weekKey] = [0, 0, 0, 0, 0]
-      const zones = estimateZonesFromHR(act.avgHR, act.duration, settings.maxHR)
+      if (!hasUsableHR(act, settings.maxHR)) continue
+      const zones = estimateZonesFromHR(act.avgHR, effectiveDuration(act), settings.maxHR)
       zones.forEach(z => { weeks[weekKey][z.zone - 1] += z.seconds / 3600 })
     }
     return Object.entries(weeks)
       .sort(([a], [b]) => a.localeCompare(b))
       .slice(-24)
       .map(([date, zones]) => ({
-        date: date.slice(5),
+        date: formatShortDate(date),
         z1: +zones[0].toFixed(2),
         z2: +zones[1].toFixed(2),
         z3: +zones[2].toFixed(2),
@@ -63,7 +77,7 @@ export default function ZoneAnalysis() {
           <p className="text-sm text-slate-500 mt-0.5">Distribución del tiempo por zonas de FC</p>
         </div>
         <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
-          {(['all', 'running', 'cycling', 'swimming'] as const).map(s => (
+          {sportOptions.map(s => (
             <button
               key={s}
               onClick={() => setSport(s)}
@@ -71,7 +85,7 @@ export default function ZoneAnalysis() {
                 sport === s ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {s === 'all' ? 'Todos' : s === 'running' ? '🏃' : s === 'cycling' ? '🚴' : '🏊'}
+              {s === 'all' ? 'Todos' : s === 'running' ? '🏃' : s === 'cycling' ? '🚴' : s === 'walking' ? '🚶' : s === 'gym' ? '🏋️' : '🏊'}
             </button>
           ))}
         </div>
@@ -119,7 +133,7 @@ export default function ZoneAnalysis() {
       )}
 
       <p className="mt-4 text-xs text-slate-600">
-        Zonas estimadas en base a FC media y FCmax configurada ({settings.maxHR} bpm).
+        Zonas estimadas con FC media y tiempo en movimiento. Actividades sin FC excluidas: {formatDuration(unknownSeconds)}.
       </p>
     </div>
   )

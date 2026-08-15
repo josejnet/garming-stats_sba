@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 """
-Garmin Connect → local JSON sync script.
+Garmin Connect â†’ local JSON sync script.
 
 Usage:
     python sync.py                  # sync all activities
@@ -19,9 +19,13 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # Load .env from project root (parent of fetch/)
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -52,7 +56,7 @@ def get_api():
         print(f"Login error: {e}")
         sys.exit(1)
 
-    print(f"Logged in as {email}")
+    print("Logged in successfully")
     return api
 
 
@@ -145,17 +149,34 @@ def save_json(path: Path, data):
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 
 
+def is_recent_summary(summary: dict, days: int = 30) -> bool:
+    start_time = (summary.get("startTime") or "")[:10]
+    try:
+        started = datetime.fromisoformat(start_time)
+    except ValueError:
+        return False
+    return started >= datetime.now() - timedelta(days=days)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Sync Garmin activities to local JSON")
     parser.add_argument("--limit", type=int, default=None, help="Max activities to sync (for testing)")
     parser.add_argument("--since", type=str, default=None, help="Only sync activities after this date (YYYY-MM-DD)")
     parser.add_argument("--no-gpx", action="store_true", help="Skip GPS data download (faster)")
+    parser.add_argument(
+        "--backfill-missing-details",
+        action="store_true",
+        help="Fetch details for old activities that are missing detail JSON. Slow; use only for one-off backfills.",
+    )
     args = parser.parse_args()
 
     from normalizer import normalize_summary, normalize_detail
+    from merge import compute_stats, load_json, save_json as save_merged_json, write_merged
 
     output_dir = Path(__file__).parent.parent / "public" / "data"
     output_dir.mkdir(parents=True, exist_ok=True)
+    existing_summaries = load_json(output_dir / "garmin_activities.json", [])
+    existing_ids = {int(item["id"]) for item in existing_summaries if item.get("id")}
 
     api = get_api()
 
@@ -168,22 +189,42 @@ def main():
         try:
             s = normalize_summary(raw)
             if s.get("id"):
+                s["source"] = "garmin"
                 summaries.append(s)
         except Exception as e:
             print(f"  WARNING: Failed to normalize activity {raw.get('activityId')}: {e}")
 
-    # Save summary list immediately so the app can start loading
-    save_json(output_dir / "activities.json", summaries)
-    print(f"Saved {len(summaries)} activity summaries → public/data/activities.json")
+    if args.limit or args.since:
+        merged_by_id = {int(item["id"]): item for item in existing_summaries if item.get("id")}
+        for item in summaries:
+            merged_by_id[int(item["id"])] = item
+        summaries = sorted(merged_by_id.values(), key=lambda item: item.get("startTime") or "", reverse=True)
 
-    # Step 3: Fetch and save details for each activity
-    print(f"\nFetching details for {len(summaries)} activities (rate-limited)...")
+    # Save Garmin summaries. The visible app dataset is written by the merge step,
+    # so Strava precedence and duplicate removal are always preserved.
+    save_json(output_dir / "garmin_activities.json", summaries)
+    print(f"Saved {len(summaries)} Garmin activity summaries")
+
+    # Step 3: Fetch and save details for new activities only.
+    print("\nFetching details for new activities only (rate-limited)...")
+    skipped_old_missing = 0
     for i, summary in enumerate(summaries):
         activity_id = summary["id"]
         detail_path = output_dir / f"activity_{activity_id}.json"
 
         if detail_path.exists():
-            print(f"  [{i+1}/{len(summaries)}] {activity_id} — already cached, skipping")
+            print(f"  [{i+1}/{len(summaries)}] {activity_id} â€” already cached, skipping")
+            continue
+
+        is_existing_activity = int(activity_id) in existing_ids
+        if (
+            is_existing_activity
+            and not is_recent_summary(summary)
+            and not args.backfill_missing_details
+            and not args.limit
+            and not args.since
+        ):
+            skipped_old_missing += 1
             continue
 
         print(f"  [{i+1}/{len(summaries)}] Fetching {activity_id} ({summary.get('title', '')})...")
@@ -199,36 +240,24 @@ def main():
         except Exception as e:
             print(f"  WARNING: Failed to process detail for {activity_id}: {e}")
 
-        # Rate limiting — critical to avoid Garmin banning the account
+        # Rate limiting â€” critical to avoid Garmin banning the account
         time.sleep(0.5)
 
+    if skipped_old_missing:
+        print(
+            f"Skipped {skipped_old_missing} old activities without cached details. "
+            "Run with --backfill-missing-details if you want to fill them later."
+        )
+
     # Step 4: Compute and save global stats
-    stats = compute_stats(summaries)
-    save_json(output_dir / "stats.json", stats)
-    print(f"\nDone! Saved stats → public/data/stats.json")
+    if (output_dir / "strava_activities.json").exists():
+        merged, _ = write_merged(output_dir)
+        print(f"Merged Garmin and Strava: {len(merged)} unique activities")
+    else:
+        stats = compute_stats(summaries)
+        save_merged_json(output_dir / "stats.json", stats)
+    print(f"\nDone! Saved stats â†’ public/data/stats.json")
     print("Run 'npm run dev' to open the app.")
-
-
-def compute_stats(summaries: list) -> dict:
-    """Compute global stats that don't change per-activity."""
-    by_sport = {}
-    for s in summaries:
-        sport = s.get("sport", "other")
-        by_sport.setdefault(sport, []).append(s)
-
-    vo2max_history = [
-        {"date": s["startTime"][:10], "value": s["vo2max"]}
-        for s in summaries
-        if s.get("vo2max")
-    ]
-    vo2max_history.sort(key=lambda x: x["date"])
-
-    return {
-        "totalActivities": len(summaries),
-        "byType": {sport: len(acts) for sport, acts in by_sport.items()},
-        "vo2maxHistory": vo2max_history,
-        "syncedAt": __import__("datetime").datetime.now().isoformat(),
-    }
 
 
 if __name__ == "__main__":

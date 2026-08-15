@@ -16,6 +16,7 @@ export function formatDuration(seconds: number): string {
 }
 
 export function formatDistance(km: number, sport: Sport): string {
+  if (sport === 'gym') return km > 0 ? `${km.toFixed(2)} km` : '—'
   if (sport === 'swimming') {
     const m = Math.round(km * 1000)
     return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${m} m`
@@ -28,13 +29,22 @@ export function formatElevation(m: number): string {
 }
 
 export function formatDate(isoString: string): string {
-  const d = new Date(isoString)
-  return d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+  return formatNumericDate(isoString)
 }
 
 export function formatShortDate(isoString: string): string {
-  const d = new Date(isoString.slice(0, 10) + 'T00:00:00')
-  return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+  return formatNumericDate(isoString)
+}
+
+export function formatNumericDate(isoString: string): string {
+  const clean = isoString.includes('T') ? isoString : `${isoString.slice(0, 10)}T00:00:00`
+  const d = new Date(clean)
+  if (Number.isNaN(d.getTime())) return isoString
+  return d.toLocaleDateString('es-ES', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
 }
 
 export function formatRelativeTime(isoString: string): string {
@@ -54,6 +64,8 @@ export function sportLabel(sport: Sport): string {
     running: 'Running',
     cycling: 'Ciclismo',
     swimming: 'Natación',
+    walking: 'Caminar',
+    gym: 'Gym',
     other: 'Otro',
   }
   return labels[sport] ?? sport
@@ -64,6 +76,8 @@ export function sportIcon(sport: Sport): string {
     running: '🏃',
     cycling: '🚴',
     swimming: '🏊',
+    walking: '🚶',
+    gym: '🏋️',
     other: '⚡',
   }
   return icons[sport] ?? '⚡'
@@ -74,6 +88,8 @@ export function sportColor(sport: Sport): string {
     running: '#ef4444',
     cycling: '#f97316',
     swimming: '#3b82f6',
+    walking: '#14b8a6',
+    gym: '#a855f7',
     other: '#8b5cf6',
   }
   return colors[sport] ?? '#6b7280'

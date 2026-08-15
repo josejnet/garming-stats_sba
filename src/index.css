@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --color-garmin-blue: #0079c1;
-  --color-garmin-dark: #003d6b;
+  --color-mostly-blue: #2563eb;
+  --color-mostly-ink: #0f172a;
   --color-run: #ef4444;
   --color-ride: #f97316;
   --color-swim: #3b82f6;
@@ -21,10 +21,183 @@
 
 body {
   margin: 0;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #edf2f7;
+  color: #0f172a;
   font-family: system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+.app-hero {
+  background: linear-gradient(135deg, #0f172a 0%, #0c1a3a 50%, #0f172a 100%);
+}
+
+html[data-theme='dark'] body {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+html[data-theme='dark'] .app-hero {
+  background: linear-gradient(135deg, #0f172a 0%, #0c1a3a 50%, #0f172a 100%);
+}
+
+html[data-theme='light'] body {
+  background: #edf2f7;
+  color: #0f172a;
+}
+
+html[data-theme='light'] .app-hero {
+  background:
+    linear-gradient(135deg, #dcecff 0%, #eef6ff 48%, #e6edff 100%);
+  border-bottom: 1px solid #c8d6ea;
+}
+
+html[data-theme='light'] .bg-\[\#080f1e\] {
+  background-color: #edf2f7 !important;
+}
+
+html[data-theme='light'] .bg-slate-900 {
+  background-color: #fbfdff !important;
+}
+
+html[data-theme='light'] .bg-slate-800,
+html[data-theme='light'] .bg-slate-800\/70,
+html[data-theme='light'] .bg-slate-800\/60,
+html[data-theme='light'] .bg-slate-800\/50,
+html[data-theme='light'] .bg-slate-800\/40,
+html[data-theme='light'] .bg-slate-800\/30 {
+  background-color: #ffffff !important;
+}
+
+html[data-theme='light'] .bg-slate-700,
+html[data-theme='light'] .bg-slate-700\/50,
+html[data-theme='light'] .bg-slate-700\/40 {
+  background-color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] .border-slate-800,
+html[data-theme='light'] .border-slate-800\/60,
+html[data-theme='light'] .border-slate-700,
+html[data-theme='light'] .border-slate-700\/50,
+html[data-theme='light'] .border-slate-700\/40 {
+  border-color: #c5d1e2 !important;
+}
+
+html[data-theme='light'] .text-slate-100,
+html[data-theme='light'] .text-slate-200,
+html[data-theme='light'] .text-slate-300 {
+  color: #0f172a !important;
+}
+
+html[data-theme='light'] .text-slate-400,
+html[data-theme='light'] .text-slate-500 {
+  color: #475569 !important;
+}
+
+html[data-theme='light'] .text-slate-600 {
+  color: #64748b !important;
+}
+
+html[data-theme='light'] .text-blue-400,
+html[data-theme='light'] .text-blue-300 {
+  color: #2563eb !important;
+}
+
+html[data-theme='light'] .text-purple-400 {
+  color: #9333ea !important;
+}
+
+html[data-theme='light'] .text-emerald-400,
+html[data-theme='light'] .text-emerald-300 {
+  color: #047857 !important;
+}
+
+html[data-theme='light'] .text-red-400,
+html[data-theme='light'] .text-red-300 {
+  color: #b91c1c !important;
+}
+
+html[data-theme='light'] .text-rose-400 {
+  color: #e11d48 !important;
+}
+
+html[data-theme='light'] .text-orange-400,
+html[data-theme='light'] .text-orange-300 {
+  color: #c2410c !important;
+}
+
+html[data-theme='light'] .text-amber-400,
+html[data-theme='light'] .text-amber-300 {
+  color: #b45309 !important;
+}
+
+html[data-theme='light'] .hover\:bg-slate-800:hover,
+html[data-theme='light'] .hover\:bg-slate-800\/70:hover {
+  background-color: #e9f1fb !important;
+}
+
+html[data-theme='light'] .hover\:border-slate-600\/60:hover,
+html[data-theme='light'] .hover\:border-slate-600\/50:hover,
+html[data-theme='light'] .hover\:border-slate-500:hover,
+html[data-theme='light'] .hover\:border-slate-500\/70:hover {
+  border-color: #b7c2d2 !important;
+}
+
+html[data-theme='light'] input,
+html[data-theme='light'] select {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+html[data-theme='light'] .bg-blue-600\/20 {
+  background-color: #d8e7ff !important;
+}
+
+html[data-theme='light'] .bg-blue-600,
+html[data-theme='light'] .hover\:bg-blue-500:hover {
+  background-color: #2563eb !important;
+}
+
+html[data-theme='light'] .bg-blue-500\/15 {
+  background-color: #d8e7ff !important;
+}
+
+html[data-theme='light'] .border-blue-400\/30 {
+  border-color: #93baf7 !important;
+}
+
+html[data-theme='light'] .border-blue-500\/20 {
+  border-color: #93baf7 !important;
+}
+
+html[data-theme='light'] .border-orange-500\/20 {
+  border-color: #fdba74 !important;
+}
+
+html[data-theme='light'] .border-green-500\/20 {
+  border-color: #86efac !important;
+}
+
+html[data-theme='light'] aside {
+  box-shadow: 1px 0 0 #d7e0ec, 8px 0 24px rgb(15 23 42 / 0.04);
+}
+
+html[data-theme='light'] .rounded-xl.border,
+html[data-theme='light'] .rounded-lg.border {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05), 0 8px 24px rgb(15 23 42 / 0.04);
+}
+
+html[data-theme='light'] .rounded-xl.border:hover {
+  border-color: #9fb0c5 !important;
+}
+
+html[data-theme='light'] .uppercase {
+  color: #475569 !important;
+  font-weight: 650;
+}
+
+html[data-theme='light'] pre.bg-slate-900\/70 {
+  background-color: #0f172a !important;
+  color: #cbd5e1 !important;
 }
 
 /* Leaflet overrides */

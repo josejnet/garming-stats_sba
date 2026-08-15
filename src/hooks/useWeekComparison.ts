@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { useActivityStore } from '../stores/activityStore'
-import { estimateTSS } from '../utils/calculations'
+import { useActivityStore, useVisibleActivities } from '../stores/activityStore'
+import { effectiveDuration, estimateTSS } from '../utils/calculations'
 import { startOfWeek, endOfWeek } from '../utils/date'
 import type { ActivitySummary } from '../types/garmin'
 
@@ -24,7 +24,7 @@ function sumWeek(acts: ActivitySummary[], settings: ReturnType<typeof useActivit
   return {
     count: acts.length,
     distance: acts.reduce((s, a) => s + a.distance, 0),
-    duration: acts.reduce((s, a) => s + a.duration, 0),
+    duration: acts.reduce((s, a) => s + effectiveDuration(a), 0),
     tss: acts.reduce((s, a) => s + estimateTSS(a, settings), 0),
     elevation: acts.reduce((s, a) => s + (a.elevationGain ?? 0), 0),
     calories: acts.reduce((s, a) => s + (a.calories ?? 0), 0),
@@ -32,7 +32,7 @@ function sumWeek(acts: ActivitySummary[], settings: ReturnType<typeof useActivit
 }
 
 export function useWeekComparison(): WeekComparisonData {
-  const activities = useActivityStore(s => s.activities)
+  const activities = useVisibleActivities()
   const settings = useActivityStore(s => s.settings)
 
   const thisWeek = useMemo(() => {

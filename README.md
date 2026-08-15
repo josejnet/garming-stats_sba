@@ -1,8 +1,8 @@
-# Garmin Stats
+# MostlyZ2
 
-Panel personal para ver tus estadísticas de entrenamiento de Garmin Connect: actividades, mapas, zonas de FC, fitness (CTL/ATL/TSB), récords y más.
+Panel personal con MostlyZ2 Agent para ver tus estadisticas de entrenamiento: actividades, mapas, zonas de FC, fitness (CTL/ATL/TSB), records y mas.
 
-Los datos se descargan de tu cuenta de Garmin a archivos locales en tu ordenador. La app los lee desde ahí; no hay servidor en la nube ni base de datos.
+Los datos se descargan de Garmin Connect y Strava a archivos locales en tu ordenador. La app los lee desde ahi; no hay servidor en la nube ni base de datos.
 
 ---
 
@@ -30,13 +30,13 @@ También necesitas una **cuenta de Garmin Connect** (la misma que usas en la app
 
 ### 1. Descargar el proyecto
 
-Si ya tienes la carpeta `garmin-stats` en tu ordenador, ábrela en la terminal:
+Si ya tienes la carpeta `MostlyZ2` en tu ordenador, abrela en la terminal:
 
 ```bash
-cd ruta/donde/está/garmin-stats
+cd ruta/donde/esta/MostlyZ2
 ```
 
-(Sustituye `ruta/donde/está/garmin-stats` por la ruta real, por ejemplo `/Users/tu-usuario/Documents/garmin-stats`.)
+(Sustituye `ruta/donde/esta/MostlyZ2` por la ruta real, por ejemplo `/Users/tu-usuario/Documents/MostlyZ2`.)
 
 ---
 
@@ -73,7 +73,7 @@ cd ..
 
 ### 4. Descargar tus actividades de Garmin
 
-Desde la carpeta raíz del proyecto (`garmin-stats`):
+Desde la carpeta raiz del proyecto (`MostlyZ2`):
 
 ```bash
 python3 fetch/sync.py --limit N
@@ -150,6 +150,35 @@ Luego abre [http://localhost:5173](http://localhost:5173) en el navegador.
 
 ---
 
+## Conectar Strava (opcional)
+
+1. Crea una aplicación en [Strava API](https://www.strava.com/settings/api).
+2. Usa `localhost` como **Authorization Callback Domain**.
+3. Añade el Client ID y Client Secret a `.env`:
+
+```env
+STRAVA_CLIENT_ID=tu_client_id
+STRAVA_CLIENT_SECRET=tu_client_secret
+```
+
+4. Autoriza e importa tu historial:
+
+```bash
+python fetch/strava_sync.py --authorize
+```
+
+Las siguientes actualizaciones ya no necesitan abrir el navegador:
+
+```bash
+python fetch/strava_sync.py
+```
+
+La combinación detecta duplicados por deporte, hora de inicio, distancia y duración. Cuando una actividad existe en Garmin y Strava, se conserva la versión de Strava y se reutilizan los detalles Garmin que Strava no incluye en su listado.
+
+Los tokens se guardan en `.strava_tokens.json`, que está excluido de Git.
+
+---
+
 ## Ajustes dentro de la app
 
 En el menú lateral, entra en **Ajustes** para configurar:
@@ -210,7 +239,7 @@ Cierra otras ventanas de terminal donde tengas `npm run dev` corriendo, o Vite t
 ## Estructura del proyecto (referencia)
 
 ```
-garmin-stats/
+MostlyZ2/
 ├── .env                 ← Tus credenciales (no compartir)
 ├── fetch/
 │   ├── sync.py          ← Script que descarga datos de Garmin

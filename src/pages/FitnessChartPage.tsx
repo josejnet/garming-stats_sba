@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useActivityStore } from '../stores/activityStore'
+import { useActivityStore, useVisibleActivities } from '../stores/activityStore'
 import { calculateFitnessHistory } from '../utils/calculations'
 import { formatShortDate } from '../utils/formatters'
 import {
@@ -15,7 +15,7 @@ const RANGES = [
 ]
 
 export default function FitnessChartPage() {
-  const activities = useActivityStore(s => s.activities)
+  const activities = useVisibleActivities()
   const settings = useActivityStore(s => s.settings)
   const [range, setRange] = useState(180)
 
@@ -39,7 +39,7 @@ export default function FitnessChartPage() {
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-slate-100">Fitness & Forma</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Modelo de carga CTL/ATL/TSB</p>
+          <p className="text-sm text-slate-500 mt-0.5">Modelo de carga estimada CTL/ATL/TSB</p>
         </div>
         <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
           {RANGES.map(r => (
@@ -99,6 +99,7 @@ export default function FitnessChartPage() {
                 contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
                 labelStyle={{ color: '#94a3b8' }}
                 formatter={(value: unknown, name: unknown) => [Math.round(Number(value) * 10) / 10, String(name)]}
+                labelFormatter={label => formatShortDate(String(label))}
               />
               <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
               <ReferenceLine y={0} stroke="#475569" strokeDasharray="4 4" />
@@ -115,7 +116,7 @@ export default function FitnessChartPage() {
       )}
 
       <div className="mt-6 bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 text-xs text-slate-500 space-y-1">
-        <p><span className="text-blue-400">Fitness (CTL)</span> — Media exponencial de 42 días del TSS diario.</p>
+        <p><span className="text-blue-400">Fitness (CTL)</span> — Media exponencial de 42 días de la carga interna.</p>
         <p><span className="text-orange-400">Fatiga (ATL)</span> — Media exponencial de 7 días. Fatiga acumulada reciente.</p>
         <p><span className="text-green-400">Forma (TSB)</span> = CTL − ATL. Positivo = descansado. Zona óptima de competición: −10 a +5.</p>
       </div>
